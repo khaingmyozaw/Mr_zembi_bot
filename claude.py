@@ -32,9 +32,9 @@ import uuid
 import time
 import json
 import asyncio
+import os
 import httpx
 import urllib.parse
-import os
 from datetime import datetime, timedelta
 from pyrogram import Client, filters
 from pyrogram.types import (
@@ -46,37 +46,43 @@ from pyrogram.types import (
 from pyrogram.errors import FloodWait
 from dotenv import load_dotenv
 
+# Load environment variables from .env file
+load_dotenv()
+
 # ==========================
-# TELEGRAM CONFIG
+# TELEGRAM CONFIG (use .env file or set directly)
 # ==========================
-API_ID = os.getenv('API_ID')                    # <- Your API ID from my.telegram.org (INTEGER!)
-API_HASH = os.getenv('API_HASH')      # <- Your API hash from my.telegram.org
-BOT_TOKEN = os.getenv('BOT_TOKEN')  # <- Your bot token from @BotFather
+# Load from environment variables or use defaults
+API_ID = os.getenv('API_ID')
+API_HASH = os.getenv('API_HASH')
+BOT_TOKEN = os.getenv('BOT_TOKEN')
 
 # ADMIN CONFIG (IMPORTANT!)
-ADMIN_USER_ID = os.getenv('ADMIN_USER_ID')            # <- Your Telegram user ID (send /id to @userinfobot)
-ADMIN_USERNAME = os.getenv('ADMIN_USERNAME')       # <- Your admin username for support (without @)
+ADMIN_USER_ID = os.getenv('ADMIN_USER_ID')
+ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
 
 # ==========================
 # 3X-UI PANEL CONFIG
 # ==========================
-PANEL_URL = os.getenv('PANEL_URL')  # <- Your 3X-UI panel URL
-PANEL_USERNAME = os.getenv('PANEL_USERNAME') # <- 3X-UI panel username  
-PANEL_PASSWORD = os.getenv('PANEL_PASSWORD')                    # <- 3X-UI panel password
+PANEL_URL = os.getenv('PANEL_URL')
+PANEL_USERNAME = os.getenv('PANEL_USERNAME', 'admin')
+PANEL_PASSWORD = os.getenv('PANEL_PASSWORD')
 
 # SERVER CONFIG (for subscription links)
-SERVER_IP = os.getenv('SERVER_IP')               # <- Your VPN server IP (e.g., "123.45.67.89")
-SERVER_PORT = os.getenv('SERVER_PORT')                          # <- Your VPN inbound port
-SUB_PORT = os.getenv('SUB_PORT')                            # <- Subscription port (usually same as panel port)
+SERVER_IP = os.getenv('SERVER_IP', '127.0.0.1')
+SERVER_PORT = int(os.getenv('SERVER_PORT', '443'))
+SUB_PORT = int(os.getenv('SUB_PORT', '2053'))
 
-# Inbound IDs
-TRIAL_INBOUND_ID = os.getenv('TRIAL_INBOUND_ID')                       # <- Inbound ID for trial keys
-PAID_INBOUND_ID = os.getenv('PAID_INBOUND_ID')                        # <- Inbound ID for paid keys
+# Inbound IDs (each plan uses different inbound)
+TRIAL_INBOUND_ID = int(os.getenv('TRIAL_INBOUND_ID', '1'))
+PLAN1_INBOUND_ID = int(os.getenv('PLAN1_INBOUND_ID', '1'))
+PLAN2_INBOUND_ID = int(os.getenv('PLAN2_INBOUND_ID', '2'))
+PLAN3_INBOUND_ID = int(os.getenv('PLAN3_INBOUND_ID', '3'))
 
 # Trial settings
-TRIAL_DURATION_HOURS = 24
-TRIAL_TRAFFIC_GB = 1
-TRIAL_DEVICE_LIMIT = 1
+TRIAL_DURATION_HOURS = int(os.getenv('TRIAL_DURATION_HOURS', '24'))
+TRIAL_TRAFFIC_GB = int(os.getenv('TRIAL_TRAFFIC_GB', '1'))
+TRIAL_DEVICE_LIMIT = int(os.getenv('TRIAL_DEVICE_LIMIT', '1'))
 
 # ==========================
 # PLAN CONFIGURATION
@@ -97,39 +103,79 @@ VPN_PLANS = {
         "label": f"1 device = {plan_1_price}",
         "name": "Basic Plan",
         "device": "1 device",
-        "ip_limit": 1,          # IP limit for Basic
+        "ip_limit": 1,              # IP limit for Basic
         "price": plan_1_price,
-        "days": 30,             # 1 month
-        "traffic_gb": 0,        # 0 = unlimited
+        "days": 30,                 # 1 month
+        "traffic_gb": 0,            # 0 = unlimited
+        "inbound_id": PLAN1_INBOUND_ID,  # Inbound for Basic plan
     },
     "plan_2": {
         "label": f"2 devices = {plan_2_price}",
         "name": "Silver Plan",
         "device": "2 devices",
-        "ip_limit": 2,          # IP limit for Silver
+        "ip_limit": 2,              # IP limit for Silver
         "price": plan_2_price,
-        "days": 30,             # 1 month
+        "days": 30,                 # 1 month
         "traffic_gb": 0,
+        "inbound_id": PLAN2_INBOUND_ID,  # Inbound for Silver plan
     },
     "plan_3": {
         "label": f"3 devices = {plan_3_price}",
         "name": "Golden Plan",
         "device": "3 devices",
-        "ip_limit": 3,          # IP limit for Golden
+        "ip_limit": 3,              # IP limit for Golden
         "price": plan_3_price,
-        "days": 30,             # 1 month
+        "days": 30,                 # 1 month
         "traffic_gb": 0,
+        "inbound_id": PLAN3_INBOUND_ID,  # Inbound for Golden plan
     },
 }
 
 # ==========================
 # VALIDATE CONFIG
 # ==========================
-if BOT_TOKEN == "123456789:ABCdefGHIjklMNOpqrsTUVwxyz" or "your_" in API_HASH:
-    print("=" * 60)
-    print("ERROR: Configure your Telegram credentials!")
-    print("=" * 60)
-    sys.exit(1)
+def validate_config():
+    errors = []
+
+    if not API_ID:
+        errors.append("API_ID is not set")
+    if not API_HASH:
+        errors.append("API_HASH is not set")
+    if not BOT_TOKEN:
+        errors.append("BOT_TOKEN is not set")
+    if not ADMIN_USER_ID:
+        errors.append("ADMIN_USER_ID is not set")
+    if not PANEL_URL:
+        errors.append("PANEL_URL is not set")
+    if not PANEL_PASSWORD:
+        errors.append("PANEL_PASSWORD is not set")
+    
+    if errors:
+        print("=" * 60)
+        print("ERROR: Missing required environment variables!")
+        print("=" * 60)
+        for err in errors:
+            print(f"  ❌ {err}")
+        print()
+        print("Create a .env file with:")
+        print("  API_ID=12345678")
+        print("  API_HASH=your_api_hash")
+        print("  BOT_TOKEN=123456789:ABCdef...")
+        print("  ADMIN_USER_ID=your_telegram_id")
+        print("  PANEL_URL=https://your-server:2053")
+        print("  PANEL_USERNAME=admin")
+        print("  PANEL_PASSWORD=your_password")
+        print("  SERVER_IP=your-server-ip")
+        print("=" * 60)
+        sys.exit(1)
+    
+    return True
+
+validate_config()
+
+# Convert to proper types after validation
+API_ID = int(API_ID)
+ADMIN_USER_ID = int(ADMIN_USER_ID)
 
 # ==========================
 # LOGGING
@@ -181,6 +227,43 @@ class XUIClient:
         self.password = password
         self.session = None
         self.logged_in = False
+    
+    async def restart_xray(self) -> bool:
+        """
+        Restart Xray service to apply IP limit changes.
+        This is REQUIRED for limitIp to take effect!
+        """
+        if not self.logged_in:
+            if not await self.login():
+                return False
+        
+        restart_endpoints = [
+            "/panel/setting/restartXrayService",
+            "/server/restartXrayService",
+            "/xui/setting/restartXrayService",
+            "/panel/api/inbounds/onlines",  # Clears online users cache
+        ]
+        
+        for endpoint in restart_endpoints:
+            try:
+                url = f"{self.base_url}{endpoint}"
+                logger.info(f"Trying to restart Xray via: {url}")
+                resp = await self.session.post(url)
+                
+                if resp.status_code == 200:
+                    try:
+                        data = resp.json()
+                        if data.get("success"):
+                            logger.info(f"✅ Xray restarted successfully via {endpoint}")
+                            return True
+                    except:
+                        pass
+            except Exception as e:
+                logger.warning(f"Restart endpoint {endpoint} failed: {e}")
+                continue
+        
+        logger.warning("⚠️ Could not restart Xray - IP limits may not apply until manual restart")
+        return False
     
     async def login(self) -> bool:
         try:
@@ -301,6 +384,17 @@ class XUIClient:
             if response.status_code == 200:
                 result = response.json()
                 if result.get("success"):
+                    logger.info(f"✅ Client added successfully: {client_email} with IP limit: {ip_limit}")
+                    
+                    # IMPORTANT: Restart Xray to apply IP limit!
+                    # Without this, limitIp won't work!
+                    logger.info("🔄 Restarting Xray to apply IP limit...")
+                    restart_success = await self.restart_xray()
+                    if restart_success:
+                        logger.info("✅ Xray restarted - IP limit is now active!")
+                    else:
+                        logger.warning("⚠️ Xray restart failed - IP limit may not work until manual restart")
+                    
                     # Generate VLESS key
                     vless_key = self._generate_vless_key(inbound, client_uuid, client_email)
                     
@@ -315,6 +409,7 @@ class XUIClient:
                         "ip_limit": ip_limit,
                         "vless_key": vless_key,
                         "sub_link": sub_link,
+                        "xray_restarted": restart_success,
                     }
             
             return None
@@ -776,13 +871,16 @@ async def callback_handler(client: Client, query: CallbackQuery):
         buyer_user_id = payment["user_id"]
         tg_username = payment["username"]
         
+        # Use the plan's specific inbound_id (each plan has its own inbound)
+        inbound_id = plan.get("inbound_id", PLAN1_INBOUND_ID)
+        
         result = await xui.add_client(
-            inbound_id=PAID_INBOUND_ID,
+            inbound_id=inbound_id,  # Plan-specific inbound!
             email=f"{tg_username}_{plan['name'].replace(' ', '_')}",
             tg_username=tg_username,
             traffic_limit_gb=plan["traffic_gb"],
             expiry_days=plan["days"],
-            ip_limit=plan["ip_limit"],  # Plan-based IP limit
+            ip_limit=plan["ip_limit"],  # Plan-based IP limit (set in 3X-UI)
         )
         
         if result:
@@ -1034,9 +1132,10 @@ async def admin_generate(client: Client, message: Message):
         return
     
     plan = VPN_PLANS[plan_key]
+    inbound_id = plan.get("inbound_id", PLAN1_INBOUND_ID)
     
     result = await xui.add_client(
-        inbound_id=PAID_INBOUND_ID,
+        inbound_id=inbound_id,  # Plan-specific inbound!
         email=f"manual_{target_user}",
         tg_username=f"user_{target_user}",
         traffic_limit_gb=plan["traffic_gb"],
