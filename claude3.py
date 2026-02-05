@@ -1,26 +1,29 @@
 #!/usr/bin/env python3
 """
-Zembi VPN Bot - VLESS & Outline VPN Key Seller
-===============================================
+Zembi VPN Bot - VLESS VPN Key Seller with 3X-UI Integration
+============================================================
 
 Features:
-- VLESS keys via 3X-UI panel API (automated)
-- Outline keys (manual via admin - Marzban)
-- Plan-based IP limits for VLESS
-- Outline: 1 key, 2 keys, 3 keys options
+- Automatic VPN key generation via 3X-UI panel API
+- Plan-based IP limits:
+  * Basic Plan: 1 device (IP limit: 1)
+  * Silver Plan: 2 devices (IP limit: 2)
+  * Golden Plan: 3 devices (IP limit: 3)
 - 1 Month (30 days) validity for all plans
 - Telegram username as client identifier
 - Subscription links for easy app import
 - Free trial with 24-hour validity
-- Payment screenshot submission
+- Payment screenshot submission (users send to bot)
 - Admin approval/rejection with waiting animation
-- Auto VPN key generation on payment approval (VLESS only)
-- Outline purchases redirect to admin with plan info
+- Auto VPN key generation on payment approval
+- Subscription link as keyboard button on payment success
+- Full copyable keys in My Subscriptions
 
 BEFORE RUNNING:
-1. Configure Telegram credentials (API_ID, API_HASH, BOT_TOKEN)
-2. Configure ADMIN_USER_ID
-3. Configure 3X-UI panel for VLESS
+1. Configure your Telegram credentials (API_ID, API_HASH, BOT_TOKEN)
+2. Configure ADMIN_USER_ID (your Telegram user ID)
+3. Configure your 3X-UI panel URL and credentials
+4. Set your inbound IDs in the config
 """
 
 import logging
@@ -47,18 +50,19 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ==========================
-# TELEGRAM CONFIG
+# TELEGRAM CONFIG (use .env file or set directly)
 # ==========================
+# Load from environment variables or use defaults
 API_ID = os.getenv('API_ID')
 API_HASH = os.getenv('API_HASH')
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 
-# ADMIN CONFIG
+# ADMIN CONFIG (IMPORTANT!)
 ADMIN_USER_ID = os.getenv('ADMIN_USER_ID')
 ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
 
 # ==========================
-# 3X-UI PANEL CONFIG (VLESS)
+# 3X-UI PANEL CONFIG
 # ==========================
 PANEL_URL = os.getenv('PANEL_URL')
 PANEL_USERNAME = os.getenv('PANEL_USERNAME', 'admin')
@@ -83,7 +87,8 @@ TRIAL_DEVICE_LIMIT = int(os.getenv('TRIAL_DEVICE_LIMIT', '1'))
 # ==========================
 # PLAN CONFIGURATION
 # ==========================
-# Same pricing for both VLESS and Outline
+# All plans: 30 days validity, unlimited traffic
+# IP limit = device limit
 plan_1_price = "5000 ks"
 plan_2_price = "9450 ks"
 plan_3_price = "13850 ks"
@@ -93,75 +98,38 @@ KPAY_NO = "098 951 23061"
 AYA_NO = "098 951 23061"
 WAVE_NO = "098 951 23061"
 
-# VLESS Plans (3X-UI) - Automated key generation
-VLESS_PLANS = {
-    "vless_1": {
+VPN_PLANS = {
+    "plan_1": {
         "label": f"1 device = {plan_1_price}",
-        "name": "VLESS Basic",
+        "name": "Basic Plan",
         "device": "1 device",
-        "ip_limit": 1,
+        "ip_limit": 1,              # IP limit for Basic
         "price": plan_1_price,
-        "days": 30,
-        "traffic_gb": 0,
-        "inbound_id": PLAN1_INBOUND_ID,
-        "type": "vless",
+        "days": 30,                 # 1 month
+        "traffic_gb": 0,            # 0 = unlimited
+        "inbound_id": PLAN1_INBOUND_ID,  # Inbound for Basic plan
     },
-    "vless_2": {
+    "plan_2": {
         "label": f"2 devices = {plan_2_price}",
-        "name": "VLESS Silver",
+        "name": "Silver Plan",
         "device": "2 devices",
-        "ip_limit": 2,
+        "ip_limit": 2,              # IP limit for Silver
         "price": plan_2_price,
-        "days": 30,
+        "days": 30,                 # 1 month
         "traffic_gb": 0,
-        "inbound_id": PLAN2_INBOUND_ID,
-        "type": "vless",
+        "inbound_id": PLAN2_INBOUND_ID,  # Inbound for Silver plan
     },
-    "vless_3": {
+    "plan_3": {
         "label": f"3 devices = {plan_3_price}",
-        "name": "VLESS Golden",
+        "name": "Golden Plan",
         "device": "3 devices",
-        "ip_limit": 3,
+        "ip_limit": 3,              # IP limit for Golden
         "price": plan_3_price,
-        "days": 30,
+        "days": 30,                 # 1 month
         "traffic_gb": 0,
-        "inbound_id": PLAN3_INBOUND_ID,
-        "type": "vless",
+        "inbound_id": PLAN3_INBOUND_ID,  # Inbound for Golden plan
     },
 }
-
-# Outline Plans (Manual via Admin)
-# Outline keys are generated manually by admin from Marzban
-# Each key = 1 device, so plans are based on number of keys
-OUTLINE_PLANS = {
-    "outline_1": {
-        "label": f"1 key = {plan_1_price}",
-        "name": "Outline 1 Key",
-        "keys": 1,
-        "price": plan_1_price,
-        "days": 30,
-        "type": "outline",
-    },
-    "outline_2": {
-        "label": f"2 keys = {plan_2_price}",
-        "name": "Outline 2 Keys",
-        "keys": 2,
-        "price": plan_2_price,
-        "days": 30,
-        "type": "outline",
-    },
-    "outline_3": {
-        "label": f"3 keys = {plan_3_price}",
-        "name": "Outline 3 Keys",
-        "keys": 3,
-        "price": plan_3_price,
-        "days": 30,
-        "type": "outline",
-    },
-}
-
-# Combined plans for VLESS lookup (Outline is handled via admin redirect)
-ALL_PLANS = {**VLESS_PLANS}
 
 # ==========================
 # VALIDATE CONFIG
@@ -178,7 +146,7 @@ def validate_config():
     if not ADMIN_USER_ID:
         errors.append("ADMIN_USER_ID is not set")
     if not PANEL_URL:
-        errors.append("PANEL_URL is not set (for VLESS)")
+        errors.append("PANEL_URL is not set")
     if not PANEL_PASSWORD:
         errors.append("PANEL_PASSWORD is not set")
     
@@ -189,7 +157,15 @@ def validate_config():
         for err in errors:
             print(f"  ❌ {err}")
         print()
-        print("Create a .env file with required variables.")
+        print("Create a .env file with:")
+        print("  API_ID=12345678")
+        print("  API_HASH=your_api_hash")
+        print("  BOT_TOKEN=123456789:ABCdef...")
+        print("  ADMIN_USER_ID=your_telegram_id")
+        print("  PANEL_URL=https://your-server:2053")
+        print("  PANEL_USERNAME=admin")
+        print("  PANEL_PASSWORD=your_password")
+        print("  SERVER_IP=your-server-ip")
         print("=" * 60)
         sys.exit(1)
     
@@ -214,7 +190,7 @@ logger = logging.getLogger(__name__)
 # BOT INIT
 # ==========================
 app = Client(
-    "zembi_vpn_bot",
+    "zembi_bot",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
@@ -233,77 +209,119 @@ waiting_tasks = {}
 # VPN APPS LIST
 # ==========================
 VPN_APPS = [
-    {"name": "V2RayNG", "platform": "Android", "url": "https://play.google.com/store/apps/details?id=com.v2ray.ang", "for": "vless"},
-    {"name": "Hiddify", "platform": "Android/iOS", "url": "https://hiddify.com", "for": "vless"},
-    {"name": "Streisand", "platform": "iOS", "url": "https://apps.apple.com/app/streisand", "for": "vless"},
-    {"name": "V2RayN", "platform": "Windows", "url": "https://github.com/2dust/v2rayN", "for": "vless"},
-    {"name": "Outline", "platform": "All Platforms", "url": "https://getoutline.org/get-started/#step-3", "for": "outline"},
+    {"name": "V2RayNG", "platform": "Android", "url": "https://play.google.com/store/apps/details?id=com.v2ray.ang"},
+    {"name": "Hiddify", "platform": "Android/iOS", "url": "https://hiddify.com"},
+    {"name": "Streisand", "platform": "iOS", "url": "https://apps.apple.com/app/streisand"},
+    {"name": "V2RayN", "platform": "Windows", "url": "https://github.com/2dust/v2rayN"},
+    {"name": "Qv2ray", "platform": "Linux/Mac", "url": "https://github.com/Qv2ray/Qv2ray"},
 ]
 
 
 # ==========================
-# 3X-UI API CLASS (VLESS)
+# 3X-UI API CLASS
 # ==========================
 class XUIClient:
     def __init__(self, base_url: str, username: str, password: str):
-        self.base_url = base_url.rstrip("/") if base_url else ""
+        self.base_url = base_url.rstrip("/")
         self.username = username
         self.password = password
         self.session = None
         self.logged_in = False
+        # Auto-detect if we need HTTPS
+        self.use_https = self.base_url.startswith("https://")
     
     async def restart_xray(self) -> bool:
+        """
+        Restart Xray service to apply IP limit changes.
+        This is REQUIRED for limitIp to take effect!
+        """
         if not self.logged_in:
             if not await self.login():
                 return False
         
         restart_endpoints = [
             "/panel/setting/restartXrayService",
-            "/server/restartXrayService",
+            "/server/restartXrayService", 
             "/xui/setting/restartXrayService",
         ]
         
         for endpoint in restart_endpoints:
             try:
                 url = f"{self.base_url}{endpoint}"
+                logger.info(f"Trying to restart Xray via: {url}")
                 resp = await self.session.post(url)
+                
                 if resp.status_code == 200:
-                    data = resp.json()
-                    if data.get("success"):
-                        logger.info(f"✅ Xray restarted via {endpoint}")
-                        return True
+                    try:
+                        data = resp.json()
+                        if data.get("success"):
+                            logger.info(f"✅ Xray restarted successfully via {endpoint}")
+                            return True
+                    except:
+                        pass
             except Exception as e:
+                logger.warning(f"Restart endpoint {endpoint} failed: {e}")
                 continue
         
-        logger.warning("⚠️ Could not restart Xray")
+        logger.warning("⚠️ Could not restart Xray - IP limits may not apply until manual restart")
         return False
     
     async def login(self) -> bool:
-        if not self.base_url:
-            return False
         try:
+            # Use HTTPS if the URL starts with https
             self.session = httpx.AsyncClient(
                 timeout=30.0,
-                verify=False,
+                verify=False,  # Skip SSL verification
                 follow_redirects=True,
             )
             
             login_url = f"{self.base_url}/login"
+            logger.info(f"Attempting login to: {login_url}")
+            
             response = await self.session.post(
                 login_url,
                 data={"username": self.username, "password": self.password},
                 headers={"Content-Type": "application/x-www-form-urlencoded"}
             )
             
+            logger.info(f"Login response: {response.status_code}")
+            logger.info(f"Login response URL: {response.url}")  # Debug: see final URL after redirects
+            
+            # If we were redirected to HTTPS, update base_url
+            final_url = str(response.url)
+            if final_url.startswith("https://") and not self.base_url.startswith("https://"):
+                # Extract base URL from final URL
+                from urllib.parse import urlparse
+                parsed = urlparse(final_url)
+                self.base_url = f"{parsed.scheme}://{parsed.netloc}"
+                if "/dashboard" in final_url or "/panel" in final_url:
+                    # Preserve path prefix like /dashboard
+                    path_parts = parsed.path.split("/")
+                    for part in path_parts:
+                        if part and part not in ["login", "panel", "api"]:
+                            self.base_url = f"{self.base_url}/{part}"
+                            break
+                logger.info(f"Updated base URL to: {self.base_url}")
+            
             if response.status_code == 200:
-                result = response.json()
-                if result.get("success"):
-                    self.logged_in = True
-                    logger.info("Successfully logged into 3X-UI")
-                    return True
+                try:
+                    result = response.json()
+                    if result.get("success"):
+                        self.logged_in = True
+                        logger.info("Successfully logged into 3X-UI panel")
+                        logger.info(f"Cookies: {dict(self.session.cookies)}")
+                        return True
+                    else:
+                        logger.error(f"Login failed: {result}")
+                except Exception as e:
+                    logger.error(f"Failed to parse login response: {e}")
+                    logger.error(f"Response text: {response.text[:500]}")
+            
             return False
         except Exception as e:
             logger.error(f"Login error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
     
     async def get_inbound(self, inbound_id: int) -> dict | None:
@@ -313,17 +331,31 @@ class XUIClient:
         
         try:
             api_url = f"{self.base_url}/panel/api/inbounds/list"
+            logger.info(f"Getting inbounds from: {api_url}")
             response = await self.session.get(api_url)
+            
+            logger.info(f"Get inbounds response: {response.status_code}")
             
             if response.status_code == 200:
                 result = response.json()
                 if result.get("success"):
-                    for inbound in result.get("obj", []):
+                    inbounds = result.get("obj", [])
+                    logger.info(f"Found {len(inbounds)} inbounds")
+                    for inbound in inbounds:
                         if inbound.get("id") == inbound_id:
+                            logger.info(f"Found inbound {inbound_id}: {inbound.get('remark', 'no remark')}")
                             return inbound
+                    logger.error(f"Inbound {inbound_id} not found in list. Available IDs: {[i.get('id') for i in inbounds]}")
+                else:
+                    logger.error(f"Get inbounds failed: {result}")
+            else:
+                logger.error(f"Get inbounds HTTP error: {response.status_code}")
+                logger.error(f"Response: {response.text[:500]}")
             return None
         except Exception as e:
             logger.error(f"Error getting inbound: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
     
     async def add_client(
@@ -331,26 +363,42 @@ class XUIClient:
         inbound_id: int,
         email: str,
         tg_username: str = "",
+        uuid_str: str = None,
         traffic_limit_gb: int = 0,
         expiry_days: int = 30,
         ip_limit: int = 1,
     ) -> dict | None:
+        """
+        Add a new client to an inbound.
+        
+        Args:
+            inbound_id: The inbound ID to add client to
+            email: Client email/identifier (used for remark)
+            tg_username: Telegram username to set on the key
+            uuid_str: Optional UUID, auto-generated if not provided
+            traffic_limit_gb: Traffic limit in GB (0 = unlimited)
+            expiry_days: Number of days until expiry
+            ip_limit: Maximum concurrent IPs/devices
+        """
         try:
             if not self.logged_in:
                 if not await self.login():
+                    logger.error("Failed to login before adding client")
                     return None
             
             inbound = await self.get_inbound(inbound_id)
             if not inbound:
-                logger.error(f"Inbound {inbound_id} not found")
+                logger.error(f"Inbound {inbound_id} not found. Check your INBOUND_ID settings.")
                 return None
             
-            client_uuid = str(uuid.uuid4())
+            client_uuid = uuid_str or str(uuid.uuid4())
             expiry_time = int((datetime.now() + timedelta(days=expiry_days)).timestamp() * 1000)
             traffic_limit = traffic_limit_gb * 1024 * 1024 * 1024 if traffic_limit_gb > 0 else 0
             
+            # Use telegram username as the client remark/email
             client_email = f"{tg_username}_{int(time.time())}" if tg_username else email
             
+            # Client settings for VLESS
             client_settings = {
                 "id": client_uuid,
                 "email": client_email,
@@ -360,46 +408,110 @@ class XUIClient:
                 "enable": True,
                 "tgId": "",
                 "subId": client_email,
-                "flow": ""
+                "flow": ""  # Empty for non-XTLS, or "xtls-rprx-vision" for XTLS
             }
             
+            # Prepare the request data
             settings_json = json.dumps({"clients": [client_settings]})
             
-            api_url = f"{self.base_url}/panel/api/inbounds/addClient"
-            response = await self.session.post(
-                api_url,
-                data={"id": inbound_id, "settings": settings_json},
-                headers={"Content-Type": "application/x-www-form-urlencoded"}
-            )
+            logger.info(f"Adding client to inbound {inbound_id}")
+            logger.info(f"Client email: {client_email}, IP limit: {ip_limit}")
+            logger.info(f"Settings: {settings_json}")
             
-            if response.status_code == 200:
-                result = response.json()
-                if result.get("success"):
-                    logger.info(f"✅ Client added: {client_email} IP limit: {ip_limit}")
+            # Try multiple API endpoints
+            api_endpoints = [
+                "/panel/api/inbounds/addClient",
+                "/panel/inbound/addClient",
+                "/xui/API/inbounds/addClient",
+            ]
+            
+            for endpoint in api_endpoints:
+                try:
+                    api_url = f"{self.base_url}{endpoint}"
+                    logger.info(f"Trying to add client via: {api_url}")
                     
-                    # Restart Xray to apply IP limit
-                    await self.restart_xray()
+                    # Method 1: Form data with id and settings
+                    response = await self.session.post(
+                        api_url,
+                        data={
+                            "id": inbound_id,
+                            "settings": settings_json
+                        },
+                        headers={"Content-Type": "application/x-www-form-urlencoded"}
+                    )
                     
-                    vless_key = self._generate_vless_key(inbound, client_uuid, client_email)
-                    sub_link = f"https://{SERVER_IP}:{SUB_PORT}/sub/{urllib.parse.quote(client_email)}"
+                    logger.info(f"Add client response status: {response.status_code}")
+                    logger.info(f"Add client response: {response.text[:500] if response.text else 'empty'}")
                     
-                    return {
-                        "uuid": client_uuid,
-                        "email": client_email,
-                        "expiry": datetime.now() + timedelta(days=expiry_days),
-                        "ip_limit": ip_limit,
-                        "vless_key": vless_key,
-                        "sub_link": sub_link,
-                    }
+                    if response.status_code == 200:
+                        try:
+                            result = response.json()
+                            if result.get("success"):
+                                logger.info(f"✅ Client added successfully: {client_email} with IP limit: {ip_limit}")
+                                
+                                # Restart Xray to apply IP limit
+                                logger.info("🔄 Restarting Xray to apply IP limit...")
+                                restart_success = await self.restart_xray()
+                                if restart_success:
+                                    logger.info("✅ Xray restarted - IP limit is now active!")
+                                else:
+                                    logger.warning("⚠️ Xray restart failed - IP limit may not work until manual restart")
+                                
+                                # Generate VLESS key
+                                vless_key = self._generate_vless_key(inbound, client_uuid, client_email)
+                                
+                                # Generate subscription link
+                                sub_link = self._generate_sub_link(client_email)
+                                
+                                return {
+                                    "uuid": client_uuid,
+                                    "email": client_email,
+                                    "expiry": datetime.now() + timedelta(days=expiry_days),
+                                    "traffic_limit_gb": traffic_limit_gb,
+                                    "ip_limit": ip_limit,
+                                    "vless_key": vless_key,
+                                    "sub_link": sub_link,
+                                    "xray_restarted": restart_success,
+                                }
+                            else:
+                                logger.error(f"Add client failed: {result}")
+                                # Check for specific error message
+                                if "Duplicate" in str(result) or "exist" in str(result).lower():
+                                    logger.error("Client may already exist with this email")
+                        except json.JSONDecodeError:
+                            logger.error(f"Failed to parse response as JSON: {response.text[:200]}")
+                    elif response.status_code == 404:
+                        logger.info(f"Endpoint {endpoint} not found, trying next...")
+                        continue
+                    else:
+                        logger.error(f"HTTP {response.status_code}: {response.text[:200]}")
+                        
+                except Exception as e:
+                    logger.error(f"Error with endpoint {endpoint}: {e}")
+                    continue
+            
+            logger.error("All add_client endpoints failed")
             return None
+            
         except Exception as e:
             logger.error(f"Error adding client: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
     
+    def _generate_sub_link(self, client_email: str) -> str:
+        """Generate subscription link for the client."""
+        # 3X-UI subscription URL format
+        # Usually: https://SERVER:PORT/sub/CLIENT_EMAIL
+        sub_url = f"https://{SERVER_IP}:{SUB_PORT}/sub/{urllib.parse.quote(client_email)}"
+        return sub_url
+    
     def _generate_vless_key(self, inbound: dict, client_uuid: str, remark: str) -> str:
+        """Generate VLESS connection string."""
         try:
             stream_settings = json.loads(inbound.get("streamSettings", "{}"))
             port = inbound.get("port", SERVER_PORT)
+            server = SERVER_IP
             network = stream_settings.get("network", "tcp")
             security = stream_settings.get("security", "none")
             
@@ -417,6 +529,8 @@ class XUIClient:
                     params.append(f"sni={reality_settings['serverNames'][0]}")
                 if reality_settings.get("publicKey"):
                     params.append(f"pbk={reality_settings['publicKey']}")
+                if reality_settings.get("fingerprint"):
+                    params.append(f"fp={reality_settings['fingerprint']}")
             else:
                 params.append("security=none")
             
@@ -424,17 +538,27 @@ class XUIClient:
                 ws_settings = stream_settings.get("wsSettings", {})
                 if ws_settings.get("path"):
                     params.append(f"path={urllib.parse.quote(ws_settings['path'])}")
+                if ws_settings.get("headers", {}).get("Host"):
+                    params.append(f"host={ws_settings['headers']['Host']}")
+            elif network == "grpc":
+                grpc_settings = stream_settings.get("grpcSettings", {})
+                if grpc_settings.get("serviceName"):
+                    params.append(f"serviceName={grpc_settings['serviceName']}")
             
             params.append("encryption=none")
             query_string = "&".join(params)
-            encoded_remark = urllib.parse.quote(remark)
             
-            return f"vless://{client_uuid}@{SERVER_IP}:{port}?{query_string}#{encoded_remark}"
+            # URL encode the remark
+            encoded_remark = urllib.parse.quote(remark)
+            vless_key = f"vless://{client_uuid}@{server}:{port}?{query_string}#{encoded_remark}"
+            
+            return vless_key
         except Exception as e:
-            return f"vless://{client_uuid}@{SERVER_IP}:{SERVER_PORT}?security=none&type=tcp#{remark}"
+            logger.error(f"Error generating VLESS key: {e}")
+            return f"vless://{client_uuid}@{server}:{port}?security=none&type=tcp#{remark}"
 
 
-# Initialize 3X-UI client (VLESS only)
+# Initialize 3X-UI client
 xui = XUIClient(PANEL_URL, PANEL_USERNAME, PANEL_PASSWORD)
 
 
@@ -456,7 +580,10 @@ async def show_waiting_animation(client: Client, chat_id: int, message_id: int, 
                 f"💳 Payment ID: `{payment_id[:8]}`\n"
                 f"📦 Plan: {payment['plan_name']}\n"
                 f"⏱ စောင့်ဆိုင်းချိန်: {mins}:{secs:02d}\n\n"
-                "📸 Screenshot ကို Admin ဆီပို့ပြီးပါပြီ။"
+                "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "📸 Screenshot ကို Admin ဆီပို့ပြီးပါပြီ။\n"
+                "✅ Approve ဖြစ်ရင် VPN key ပို့ပေးပါမယ်။\n"
+                "❌ Reject ဖြစ်ရင် အကြောင်းကြားပါမယ်။"
             )
             
             await client.edit_message_text(
@@ -470,19 +597,14 @@ async def show_waiting_animation(client: Client, chat_id: int, message_id: int, 
             
         except asyncio.CancelledError:
             break
-        except Exception:
+        except Exception as e:
+            logger.error(f"Animation error: {e}")
             await asyncio.sleep(5)
 
 
 # ==========================
 # HELPERS
 # ==========================
-def get_outline_admin_url(plan_name: str, num_keys: int, price: str) -> str:
-    """Generate admin redirect URL with pre-filled Outline plan info."""
-    message = f"Outline key ဝယ်မယ်\n\n📦 Plan: {plan_name}\n🔑 Keys: {num_keys}\n💵 Price: {price}"
-    return f"https://t.me/{ADMIN_USERNAME}?text={urllib.parse.quote(message)}"
-
-
 def get_main_menu_keyboard():
     return InlineKeyboardMarkup([
         [
@@ -490,17 +612,17 @@ def get_main_menu_keyboard():
             InlineKeyboardButton("📋 My Subscriptions", callback_data="my_subs"),
         ],
         [
+            InlineKeyboardButton("💰 View Prices", callback_data="view_prices"),
             InlineKeyboardButton("📲 VPN Apps", callback_data="vpn_apps"),
-            InlineKeyboardButton("🆘 Support", url=f"https://t.me/{ADMIN_USERNAME}"),
         ],
         [
-            InlineKeyboardButton("🔐 VLESS VPN", callback_data="vless_prices"),
-            InlineKeyboardButton("🌐 Outline VPN", callback_data="outline_prices"),
+            InlineKeyboardButton("🆘 Contact Support", url=f"https://t.me/{ADMIN_USERNAME}"),
         ],
     ])
 
 
 def get_username(user) -> str:
+    """Get telegram username or generate one from user info."""
     if user.username:
         return user.username
     elif user.first_name:
@@ -520,23 +642,19 @@ async def start_handler(client: Client, message: Message):
     text = (
         f"မင်္ဂလာပါ {user_name}! 🙏🏻\n\n"
         "ကျနော်က **Zembi** ပါ။ ✌🏻\n\n"
-        "🔐 **VLESS** နဲ့ 🌐 **Outline** VPN key တွေကို\n"
+        "ချိတ်ဆက်ရ လွယ်ကူပြီး\n"
+        "လိုင်းဆွဲအား ကောင်းမွန်တဲ့\n"
+        "🔑 VLESS VPN key တွေကို\n"
         "စျေးနှုန်း ချိုချိုသာသာနဲ့ ရောင်းပေးနေတာပါဗျ။\n\n"
-        "**🔐 VLESS VPN:**\n"
-        "• လက်ရှိ မြန်မာနိုင်ငံနှင့် အသင့်တော်ဆုံး\n"
-        "• V2Ray, Hiddify app များဖြင့် သုံးရန်\n"
-        "• Singapore Server 🇸🇬\n\n"
-        "**🌐 Outline VPN:**\n"
-        "• Outline app ဖြင့် သုံးရန်\n"
-        "• အလွယ်တကူ ချိတ်ဆက်နိုင်\n"
-        "• US Server 🇺🇸\n\n"
+        "**📋 Plans:**\n"
+        "• Basic (1 device): 5000 ks\n"
+        "• Silver (2 devices): 9450 ks\n"
+        "• Golden (3 devices): 13850 ks\n\n"
+        "🌏 Server: Singapore 🇸🇬\n"
+        "⚡ Speed: High-Speed\n"
         "📊 Data: Unlimited\n"
         "⏰ Validity: 30 Days\n\n"
-        "ကျနော် လက်ရှိခရီးသွားနေလို့ key error များအတွက် ၂၂ရက်ကျော်မှာ အကုန်ပြန်စစ်ပေးပါမယ်ဗျ။\n"
-        "ဒီကြားရက်များအတွက်လည်း ရက်အစားထိုးများနှင့် ရက်အပိုများ ပြန်လည်ပေးသွားမှာပါဗျ။\n\n"
-        "key အသစ်များကိုတော့ အောက်က menu မှ\n"
-        "VLESS VPN သို့မဟုတ် Outline VPN ကိုနှိပ်ပြီး ဝယ်ယူနိုင်ပါတယ်ဗျ။\n\n"
-        "ဝယ်ယူအားပေးသူများ အားလုံးကို ကျေးဇူးအများကြီး တင်ပါတယ်ဗျ။ 🙏🏻\n\n"
+        "အောက်က menu မှ ရွေးချယ်ပါ:"
     )
     await message.reply_text(text, reply_markup=get_main_menu_keyboard())
 
@@ -552,14 +670,14 @@ async def callback_handler(client: Client, query: CallbackQuery):
     
     await query.answer()
 
-    # ========== FREE TRIAL (VLESS) ==========
+    # ========== FREE TRIAL ==========
     if data == "free_trial":
         if user_trials.get(user_id, {}).get("used"):
             await query.message.reply_text(
-                "❌ **Free Trial ယူပြီးသားဖြစ်ပါတယ်။**",
+                "❌ **Free Trial ယူပြီးသားဖြစ်ပါတယ်။**\n\n"
+                "Plan ဝယ်ယူဖို့ View Prices ကိုနှိပ်ပါ။",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔐 VLESS VPN", callback_data="vless_prices")],
-                    [InlineKeyboardButton("🌐 Outline VPN", callback_data="outline_prices")],
+                    [InlineKeyboardButton("💰 View Prices", callback_data="view_prices")],
                     [InlineKeyboardButton("⬅️ Back", callback_data="back_menu")],
                 ])
             )
@@ -568,9 +686,11 @@ async def callback_handler(client: Client, query: CallbackQuery):
         loading_msg = await query.message.reply_text("⏳ Trial key ထုတ်ပေးနေပါတယ်...")
         
         tg_username = get_username(user)
+        email = f"trial_{tg_username}"
+        
         result = await xui.add_client(
             inbound_id=TRIAL_INBOUND_ID,
-            email=f"trial_{tg_username}",
+            email=email,
             tg_username=tg_username,
             traffic_limit_gb=TRIAL_TRAFFIC_GB,
             expiry_days=TRIAL_DURATION_HOURS / 24,
@@ -578,38 +698,54 @@ async def callback_handler(client: Client, query: CallbackQuery):
         )
         
         if result:
-            user_trials[user_id] = {"used": True, "key": result["vless_key"]}
+            user_trials[user_id] = {
+                "used": True,
+                "key": result["vless_key"],
+                "sub_link": result["sub_link"],
+                "expires": result["expiry"]
+            }
+            
             expiry = result["expiry"].strftime("%Y-%m-%d %H:%M")
+            
+            await loading_msg.edit_text(
+                "🎁 **Free Trial Activated!**\n\n"
+                f"👤 User: @{tg_username}\n"
+                f"📱 Device Limit: {TRIAL_DEVICE_LIMIT}\n"
+                f"📊 Traffic: {TRIAL_TRAFFIC_GB} GB\n"
+                f"⏰ Duration: {TRIAL_DURATION_HOURS} Hours\n"
+                f"📅 Expires: {expiry}\n\n"
+                "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "🔑 **VLESS Key:**\n"
+                f"`{result['vless_key']}`\n\n"
+                "_(Tap to copy)_\n\n"
+                "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "💡 **အသုံးပြုနည်း:**\n"
+                "1. VPN App ဒေါင်းလုပ်ပါ\n"
+                "2. VLESS Key သို့မဟုတ် Sub Link ကူးပါ\n"
+                "3. App မှာ Import/Add လုပ်ပါ\n"
+                "4. Connect နှိပ်ပြီး သုံးပါ! 🚀",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📱 Open Subscription Link", url=result['sub_link'])],
+                    [InlineKeyboardButton("📲 VPN Apps", callback_data="vpn_apps")],
+                    [InlineKeyboardButton("💰 Upgrade Plan", callback_data="view_prices")],
+                    [InlineKeyboardButton("⬅️ Menu", callback_data="back_menu")],
+                ])
+            )
             
             if user_id not in user_subscriptions:
                 user_subscriptions[user_id] = []
             user_subscriptions[user_id].append({
-                "plan": "Free Trial (VLESS)",
-                "type": "vless",
+                "plan": "Free Trial",
                 "status": "active",
                 "expires": expiry,
                 "key": result["vless_key"],
                 "sub_link": result["sub_link"],
                 "ip_limit": TRIAL_DEVICE_LIMIT,
             })
-            
-            await loading_msg.edit_text(
-                "🎁 **Free Trial Activated!**\n\n"
-                f"📱 Device Limit: {TRIAL_DEVICE_LIMIT}\n"
-                f"⏰ Duration: {TRIAL_DURATION_HOURS} Hours\n"
-                f"📅 Expires: {expiry}\n\n"
-                "🔑 **VLESS Key:**\n"
-                f"`{result['vless_key']}`\n\n"
-                "_(Tap to copy)_",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📱 Open Sub Link", url=result['sub_link'])],
-                    [InlineKeyboardButton("📲 VPN Apps", callback_data="vpn_apps")],
-                    [InlineKeyboardButton("⬅️ Menu", callback_data="back_menu")],
-                ])
-            )
         else:
             await loading_msg.edit_text(
-                "❌ **Error ဖြစ်သွားပါတယ်။** Admin ကို ဆက်သွယ်ပါ။",
+                "❌ **Error ဖြစ်သွားပါတယ်။**\n"
+                "Admin ကို ဆက်သွယ်ပါ။",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🆘 Support", url=f"https://t.me/{ADMIN_USERNAME}")],
                 ])
@@ -619,35 +755,34 @@ async def callback_handler(client: Client, query: CallbackQuery):
     elif data == "my_subs":
         subs = user_subscriptions.get(user_id, [])
         if subs:
+            # Show summary first
             text = "📋 **Your Subscriptions:**\n\n"
             buttons = []
             
             for i, sub in enumerate(subs, 1):
                 status_emoji = "✅" if sub.get("status") == "active" else "❌"
-                type_emoji = "🔐" if sub.get("type") == "vless" else "🌐"
                 text += (
-                    f"**{i}. {type_emoji} {sub['plan']}** {status_emoji}\n"
-                    f"   📅 Expires: {sub['expires']}\n\n"
+                    f"**{i}. {sub['plan']}** {status_emoji}\n"
+                    f"   📅 Expires: {sub['expires']}\n"
+                    f"   📱 IP Limit: {sub.get('ip_limit', 1)} device(s)\n\n"
                 )
+                # Add button to view full key details
                 buttons.append([InlineKeyboardButton(
-                    f"🔑 View Key #{i}", 
+                    f"🔑 View Key #{i} - {sub['plan']}", 
                     callback_data=f"view_key_{i-1}"
                 )])
             
-            buttons.append([
-                InlineKeyboardButton("🔐 VLESS VPN", callback_data="vless_prices"),
-                InlineKeyboardButton("🌐 Outline VPN", callback_data="outline_prices"),
-            ])
+            buttons.append([InlineKeyboardButton("💰 Buy New Plan", callback_data="view_prices")])
             buttons.append([InlineKeyboardButton("⬅️ Back", callback_data="back_menu")])
             
             await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
         else:
+            text = "📋 **Subscription မရှိသေးပါ။**\n\n🎁 Free Trial စမ်းကြည့်ပါ!"
             await query.message.reply_text(
-                "📋 **Subscription မရှိသေးပါ။**\n🎁 Free Trial စမ်းကြည့်ပါ!",
+                text,
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🎁 Free Trial", callback_data="free_trial")],
-                    [InlineKeyboardButton("🔐 VLESS VPN", callback_data="vless_prices")],
-                    [InlineKeyboardButton("🌐 Outline VPN", callback_data="outline_prices")],
+                    [InlineKeyboardButton("💰 View Prices", callback_data="view_prices")],
                     [InlineKeyboardButton("⬅️ Back", callback_data="back_menu")],
                 ])
             )
@@ -659,85 +794,71 @@ async def callback_handler(client: Client, query: CallbackQuery):
         
         if key_idx < len(subs):
             sub = subs[key_idx]
-            key_value = sub.get("key", "N/A")
+            status_emoji = "✅" if sub.get("status") == "active" else "❌"
             
             text = (
-                f"🔑 **{sub['plan']}**\n"
+                f"🔑 **{sub['plan']}** {status_emoji}\n"
                 "━━━━━━━━━━━━━━━━━━━━━━\n\n"
                 f"📅 Expires: {sub['expires']}\n"
                 f"📱 IP Limit: {sub.get('ip_limit', 1)} device(s)\n\n"
-                "🔑 **Key (Tap to copy):**\n"
-                f"`{key_value}`\n\n"
-                "📱 **Subscription Link:**\n"
-                f"`{sub.get('sub_link', 'N/A')}`"
+                "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "🔑 **VLESS Key (Tap to copy):**\n"
+                f"`{sub.get('key', 'N/A')}`\n\n"
+                "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "📱 **Subscription Link (Tap to copy):**\n"
+                f"`{sub.get('sub_link', 'N/A')}`\n\n"
+                "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "💡 Key ကို copy လုပ်ပြီး VPN App မှာ paste လုပ်ပါ။\n"
+                "သို့မဟုတ် Subscription Link ကို import လုပ်ပါ။"
             )
             
             buttons = []
             if sub.get('sub_link'):
-                buttons.append([InlineKeyboardButton("📱 Open Sub Link", url=sub['sub_link'])])
+                buttons.append([InlineKeyboardButton("📱 Open Subscription Link", url=sub['sub_link'])])
             buttons.append([InlineKeyboardButton("📲 VPN Apps", callback_data="vpn_apps")])
-            buttons.append([InlineKeyboardButton("⬅️ Back", callback_data="my_subs")])
+            buttons.append([InlineKeyboardButton("⬅️ Back to Subscriptions", callback_data="my_subs")])
+            buttons.append([InlineKeyboardButton("🏠 Menu", callback_data="back_menu")])
             
             await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+        else:
+            await query.message.reply_text(
+                "❌ Subscription not found.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⬅️ Back", callback_data="my_subs")],
+                ])
+            )
 
-    # ========== VLESS PRICES ==========
-    elif data == "vless_prices":
+    # ========== VIEW PRICES ==========
+    elif data == "view_prices":
         await query.message.reply_text(
-            "🔐 **VLESS VPN Plans**\n\n"
+            "💰 **VPN Plans & Pricing**\n\n"
+            "**Plan အားလုံးပါဝင်သည်:**\n"
             "✅ Unlimited Data\n"
             "✅ 30 Days Validity\n"
             "✅ Singapore Server 🇸🇬\n"
-            "✅ High-Speed\n\n"
+            "✅ High-Speed Connection\n"
+            "✅ Subscription Link\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🥉 **Basic** - {plan_1_price} (1 device)\n"
-            f"🥈 **Silver** - {plan_2_price} (2 devices)\n"
-            f"🥇 **Golden** - {plan_3_price} (3 devices)\n\n"
-            "Plan ရွေးချယ်ပါ။\n"
-            "ချိတ်ဆက်နည်းများ မေးမြန်းလိုပါက Admin ဆီ တိုက်ရိုက်ဆက်သွယ်နိုင်ပါတယ်ဗျ။\n",
+            "🥉 **Basic Plan** - 5000 ks\n"
+            "   └ IP Limit: 1 device\n\n"
+            "🥈 **Silver Plan** - 9450 ks\n"
+            "   └ IP Limit: 2 devices\n\n"
+            "🥇 **Golden Plan** - 13850 ks\n"
+            "   └ IP Limit: 3 devices\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Plan ရွေးချယ်ပါ:",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"🥉 Basic - {plan_1_price}", callback_data="buy_vless_1")],
-                [InlineKeyboardButton(f"🥈 Silver - {plan_2_price}", callback_data="buy_vless_2")],
-                [InlineKeyboardButton(f"🥇 Golden - {plan_3_price}", callback_data="buy_vless_3")],
-                [InlineKeyboardButton("🌐 View Outline Plans", callback_data="outline_prices")],
+                [InlineKeyboardButton(f"🥉 Basic (1 device) - {plan_1_price}", callback_data="buy_plan_1")],
+                [InlineKeyboardButton(f"🥈 Silver (2 devices) - {plan_2_price}", callback_data="buy_plan_2")],
+                [InlineKeyboardButton(f"🥇 Golden (3 devices) - {plan_3_price}", callback_data="buy_plan_3")],
                 [InlineKeyboardButton("⬅️ Back", callback_data="back_menu")],
             ])
         )
 
-    # ========== OUTLINE PRICES (Redirect to Admin) ==========
-    elif data == "outline_prices":
-        # Create buttons that redirect to admin with plan info
-        outline_1_url = get_outline_admin_url("Outline 1 Key", 1, plan_1_price)
-        outline_2_url = get_outline_admin_url("Outline 2 Keys", 2, plan_2_price)
-        outline_3_url = get_outline_admin_url("Outline 3 Keys", 3, plan_3_price)
-        
-        await query.message.reply_text(
-            "🌐 **Outline VPN Plans**\n\n"
-            "✅ Unlimited Data\n"
-            "✅ 30 Days Validity\n"
-            "✅ Easy to connect\n"
-            "✅ US Server 🇺🇸\n"
-            "✅ Works on all platforms\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🥉 **1 Key** - {plan_1_price}\n"
-            f"🥈 **2 Keys** - {plan_2_price}\n"
-            f"🥇 **3 Keys** - {plan_3_price}\n\n"
-            "⚠️ **Note:** Outline key တစ်ခုသည် device တစ်ခုအတွက်သာ ဖြစ်ပါသည်။\n"
-            "Multi-device လိုအပ်ပါက VLESS ကို အသုံးပြုပါ။\n\n"
-            "Plan ရွေးချယ်ပါ။ (Admin ဆီ တိုက်ရိုက်ရောက်မှာဖြစ်ပါတယ်။)\n"
-            "ချိတ်ဆက်နည်းများ မေးမြန်းလိုပါက Admin ဆီ တိုက်ရိုက်ဆက်သွယ်နိုင်ပါတယ်ဗျ။\n",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"🥉 1 Key - {plan_1_price}", url=outline_1_url)],
-                [InlineKeyboardButton(f"🥈 2 Keys - {plan_2_price}", url=outline_2_url)],
-                [InlineKeyboardButton(f"🥇 3 Keys - {plan_3_price}", url=outline_3_url)],
-                [InlineKeyboardButton("🔐 View VLESS Plans", callback_data="vless_prices")],
-                [InlineKeyboardButton("⬅️ Back", callback_data="back_menu")],
-            ])
-        )
-
-    # ========== BUY VLESS PLAN ==========
-    elif data.startswith("buy_vless_"):
+    # ========== BUY PLAN ==========
+    elif data.startswith("buy_plan_"):
         plan_key = data.replace("buy_", "")
-        plan = VLESS_PLANS.get(plan_key)
+        plan = VPN_PLANS.get(plan_key)
         
         if not plan:
             return
@@ -749,18 +870,21 @@ async def callback_handler(client: Client, query: CallbackQuery):
         }
         
         text = (
-            f"🔐 **{plan['name']}**\n\n"
+            f"✅ **{plan['name']}**\n\n"
             f"📱 IP Limit: {plan['ip_limit']} device(s)\n"
             f"📊 Data: Unlimited\n"
             f"⏰ Validity: {plan['days']} days\n"
             f"💵 Price: **{plan['price']}**\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "**💳 ငွေလွှဲရန်:**\n\n"
-            f"💰 **K Pay** - {PAYMENT_NAME}\n"
+            f"💰 **K Pay**\n"
+            f"   👤 {PAYMENT_NAME}\n"
             f"   📞 `{KPAY_NO}`\n\n"
-            f"💰 **AYA Pay** - {PAYMENT_NAME}\n"
+            f"💰 **AYA Pay**\n"
+            f"   👤 {PAYMENT_NAME}\n"
             f"   📞 `{AYA_NO}`\n\n"
-            f"💰 **Wave Pay** - {PAYMENT_NAME}\n"
+            f"💰 **Wave Pay**\n"
+            f"   👤 {PAYMENT_NAME}\n"
             f"   📞 `{WAVE_NO}`\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "📸 **ငွေလွှဲပြီးရင် screenshot ပို့ပေးပါ။**\n\n"
@@ -777,23 +901,26 @@ async def callback_handler(client: Client, query: CallbackQuery):
     # ========== CANCEL PAYMENT ==========
     elif data == "cancel_payment":
         user_states.pop(user_id, None)
-        await query.message.reply_text("❌ **ပယ်ဖျက်လိုက်ပါပြီ။**", reply_markup=get_main_menu_keyboard())
+        await query.message.reply_text(
+            "❌ **ပယ်ဖျက်လိုက်ပါပြီ။**",
+            reply_markup=get_main_menu_keyboard()
+        )
 
     # ========== VPN APPS ==========
     elif data == "vpn_apps":
         text = "📲 **VPN Apps**\n\n"
-        text += "**🔐 For VLESS:**\n"
         buttons = []
         for app in VPN_APPS:
-            if app["for"] == "vless":
-                text += f"• {app['name']} - {app['platform']}\n"
-                buttons.append([InlineKeyboardButton(f"📥 {app['name']}", url=app["url"])])
+            text += f"• **{app['name']}** - {app['platform']}\n"
+            buttons.append([InlineKeyboardButton(f"📥 {app['name']}", url=app["url"])])
         
-        text += "\n**🌐 For Outline:**\n"
-        for app in VPN_APPS:
-            if app["for"] == "outline":
-                text += f"• {app['name']} - {app['platform']}\n"
-                buttons.append([InlineKeyboardButton(f"📥 {app['name']}", url=app["url"])])
+        text += (
+            "\n**အသုံးပြုနည်း:**\n"
+            "1️⃣ App တစ်ခုဒေါင်းပါ\n"
+            "2️⃣ VLESS Key/Sub Link ကူးပါ\n"
+            "3️⃣ App → Import → Paste\n"
+            "4️⃣ Connect! 🚀"
+        )
         
         buttons.append([InlineKeyboardButton("⬅️ Back", callback_data="back_menu")])
         await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
@@ -816,34 +943,37 @@ async def callback_handler(client: Client, query: CallbackQuery):
             await query.answer("❌ Already processed!", show_alert=True)
             return
         
+        # Stop animation
         if payment_id in waiting_tasks:
             waiting_tasks[payment_id].cancel()
             del waiting_tasks[payment_id]
         
         pending_payments[payment_id]["status"] = "approved"
         
+        # Generate VPN key with telegram username and plan-based IP limit
         plan = payment["plan"]
         buyer_user_id = payment["user_id"]
         tg_username = payment["username"]
         
-        # Generate VLESS key
+        # Use the plan's specific inbound_id (each plan has its own inbound)
         inbound_id = plan.get("inbound_id", PLAN1_INBOUND_ID)
+        
         result = await xui.add_client(
-            inbound_id=inbound_id,
+            inbound_id=inbound_id,  # Plan-specific inbound!
             email=f"{tg_username}_{plan['name'].replace(' ', '_')}",
             tg_username=tg_username,
             traffic_limit_gb=plan["traffic_gb"],
             expiry_days=plan["days"],
-            ip_limit=plan["ip_limit"],
+            ip_limit=plan["ip_limit"],  # Plan-based IP limit (set in 3X-UI)
         )
         
         if result:
+            # Store subscription
             if buyer_user_id not in user_subscriptions:
                 user_subscriptions[buyer_user_id] = []
             
             user_subscriptions[buyer_user_id].append({
                 "plan": plan["name"],
-                "type": "vless",
                 "status": "active",
                 "expires": result["expiry"].strftime("%Y-%m-%d %H:%M"),
                 "key": result["vless_key"],
@@ -851,32 +981,42 @@ async def callback_handler(client: Client, query: CallbackQuery):
                 "ip_limit": plan["ip_limit"],
             })
             
+            # Notify user with key and subscription link BUTTON
             try:
                 await client.send_message(
                     chat_id=buyer_user_id,
                     text=(
                         "🎉 **Payment Approved!**\n"
                         "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                        f"🔐 **{plan['name']}** activated!\n\n"
+                        f"✅ **{plan['name']}** activated!\n\n"
+                        f"👤 User: @{tg_username}\n"
                         f"📱 IP Limit: {plan['ip_limit']} device(s)\n"
                         f"📅 Duration: {plan['days']} days\n"
+                        f"📊 Traffic: Unlimited\n"
                         f"⏰ Expires: {result['expiry'].strftime('%Y-%m-%d %H:%M')}\n\n"
                         "━━━━━━━━━━━━━━━━━━━━━━\n\n"
                         "🔑 **VLESS Key (Tap to copy):**\n"
                         f"`{result['vless_key']}`\n\n"
-                        "ကျေးဇူးတင်ပါတယ် 🙏"
+                        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                        "**ချိတ်ဆက်နည်း**\n"
+                        "💡 VPN app တစ်ခုခုကို ဒေါင်းလုပ်ဆွဲပါ။\n"
+                        "💡 Key ကို copy လုပ်ပြီး VPN App မှာ paste လုပ်ပါ။\n"
+                        "💡 Connect ကို နှိပ်ပြီး ချိတ်ဆက်ပါ။\n"
+                        "ချိတ်ဆက်နည်း နားမလည်ရင်ဖြစ်ဖြစ် တစ်စုံတစ်ရာ အဆင်မပြေရင်ဖြစ်ဖြစ်\n"
+                        "ကျေးဇူးတင်ပါတယ်ဗျ 🙏"
                     ),
                     reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("📱 Open Sub Link", url=result['sub_link'])],
+                        [InlineKeyboardButton("📱 Open Subscription Link", url=result['sub_link'])],
                         [InlineKeyboardButton("📋 My Subscriptions", callback_data="my_subs")],
                         [InlineKeyboardButton("📲 VPN Apps", callback_data="vpn_apps")],
+                        [InlineKeyboardButton("🏠 Menu", callback_data="back_menu")],
                     ])
                 )
             except Exception as e:
                 logger.error(f"Failed to send to user: {e}")
             
             await query.message.edit_caption(
-                caption=query.message.caption + f"\n\n✅ **APPROVED**\n🔑 Key sent",
+                caption=query.message.caption + f"\n\n✅ **APPROVED**\n🔑 Key sent to @{tg_username}",
                 reply_markup=None
             )
         else:
@@ -920,10 +1060,14 @@ async def callback_handler(client: Client, query: CallbackQuery):
         try:
             await client.send_message(
                 chat_id=payment["user_id"],
-                text="❌ **Payment Rejected**\n\nScreenshot verify မရပါ။",
+                text=(
+                    "❌ **Payment Rejected**\n\n"
+                    "Screenshot verify မရပါ။\n"
+                    "Admin ကို ဆက်သွယ်ပါ။"
+                ),
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🆘 Contact Admin", url=f"https://t.me/{ADMIN_USERNAME}")],
-                    [InlineKeyboardButton("🔄 Try Again", callback_data="back_menu")],
+                    [InlineKeyboardButton("🔄 Try Again", callback_data="view_prices")],
                 ])
             )
         except Exception as e:
@@ -939,7 +1083,10 @@ async def callback_handler(client: Client, query: CallbackQuery):
     # ========== BACK TO MENU ==========
     elif data == "back_menu":
         user_states.pop(user_id, None)
-        await query.message.reply_text("🔐 **Zembi VPN Bot**\n\nMenu:", reply_markup=get_main_menu_keyboard())
+        await query.message.reply_text(
+            "🔐 **Zembi VPN Bot**\n\nMenu:",
+            reply_markup=get_main_menu_keyboard()
+        )
 
 
 # ==========================
@@ -952,10 +1099,9 @@ async def screenshot_handler(client: Client, message: Message):
     
     if user_id not in user_states or user_states[user_id].get("state") != "waiting_screenshot":
         await message.reply_text(
-            "❓ Plan ရွေးပါ။",
+            "❓ အရင်ဆုံး plan ရွေးပါ။",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔐 VLESS VPN", callback_data="vless_prices")],
-                [InlineKeyboardButton("🌐 Outline VPN", callback_data="outline_prices")],
+                [InlineKeyboardButton("💰 View Prices", callback_data="view_prices")],
             ])
         )
         return
@@ -983,8 +1129,9 @@ async def screenshot_handler(client: Client, message: Message):
     
     waiting_msg = await message.reply_text(
         f"✅ **Screenshot လက်ခံရရှိပါပြီ!**\n\n"
-        f"📦 Plan: 🔐 {plan['name']}\n"
-        f"⏳ Admin စစ်ဆေးနေပါတယ်..."
+        f"📦 Plan: {plan['name']}\n"
+        f"📱 IP Limit: {plan['ip_limit']}\n\n"
+        "⏳ Admin စစ်ဆေးနေပါတယ်..."
     )
     
     pending_payments[payment_id]["message_id"] = waiting_msg.id
@@ -995,9 +1142,10 @@ async def screenshot_handler(client: Client, message: Message):
         f"👤 User: {user.first_name}\n"
         f"📧 Username: @{tg_username}\n"
         f"🆔 ID: `{user_id}`\n\n"
-        f"📦 Plan: **🔐 {plan['name']}**\n"
+        f"📦 Plan: **{plan['name']}**\n"
         f"💵 Price: {plan['price']}\n"
-        f"📱 IP Limit: {plan['ip_limit']}\n\n"
+        f"📱 IP Limit: {plan['ip_limit']}\n"
+        f"⏰ Validity: {plan['days']} days\n\n"
         f"💳 Payment ID: `{payment_id[:8]}`"
     )
     
@@ -1022,7 +1170,7 @@ async def screenshot_handler(client: Client, message: Message):
     except Exception as e:
         logger.error(f"Failed to forward to admin: {e}")
         await message.reply_text(
-            "❌ Admin ဆီပို့မရပါ။",
+            "❌ Admin ဆီပို့မရပါ။ တိုက်ရိုက်ဆက်သွယ်ပါ။",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🆘 Contact Admin", url=f"https://t.me/{ADMIN_USERNAME}")],
             ])
@@ -1045,8 +1193,54 @@ async def admin_panel(client: Client, message: Message):
         f"👥 Subscribers: {len(user_subscriptions)}\n"
         f"🎁 Trial users: {len(user_trials)}\n\n"
         f"**Commands:**\n"
-        f"/generate <user_id> <plan_key>"
+        f"/generate <user_id> <plan_key>\n"
+        f"/broadcast <message>"
     )
+
+
+@app.on_message(filters.command("generate") & filters.private)
+async def admin_generate(client: Client, message: Message):
+    if message.from_user.id != ADMIN_USER_ID:
+        return
+    
+    args = message.text.split()
+    if len(args) < 3:
+        await message.reply_text(
+            "Usage: /generate <user_id> <plan_key>\n"
+            "Plans: plan_1, plan_2, plan_3"
+        )
+        return
+    
+    target_user = args[1]
+    plan_key = args[2]
+    
+    if plan_key not in VPN_PLANS:
+        await message.reply_text(f"❌ Invalid plan: {plan_key}")
+        return
+    
+    plan = VPN_PLANS[plan_key]
+    inbound_id = plan.get("inbound_id", PLAN1_INBOUND_ID)
+    
+    result = await xui.add_client(
+        inbound_id=inbound_id,  # Plan-specific inbound!
+        email=f"manual_{target_user}",
+        tg_username=f"user_{target_user}",
+        traffic_limit_gb=plan["traffic_gb"],
+        expiry_days=plan["days"],
+        ip_limit=plan["ip_limit"],
+    )
+    
+    if result:
+        await message.reply_text(
+            f"✅ **Key Generated!**\n\n"
+            f"📦 Plan: {plan['name']}\n"
+            f"📱 IP Limit: {plan['ip_limit']}\n"
+            f"📅 Expires: {result['expiry'].strftime('%Y-%m-%d')}\n\n"
+            f"🔑 **VLESS Key:**\n`{result['vless_key']}`\n\n"
+            f"📱 **Sub Link:**\n`{result['sub_link']}`"
+        )
+    else:
+        await message.reply_text("❌ Failed to generate key.")
 
 
 # ==========================
@@ -1055,8 +1249,8 @@ async def admin_panel(client: Client, message: Message):
 if __name__ == "__main__":
     print("=" * 50)
     print("🚀 Zembi VPN Bot")
-    print("   VLESS (3X-UI) - Auto key generation")
-    print("   Outline - Manual via Admin")
+    print("   Plan-based IP limits | 30 days validity")
+    print("   Telegram username on keys | Subscription links")
     print("=" * 50)
     
     try:
